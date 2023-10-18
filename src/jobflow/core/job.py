@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import typing
-import warnings
 from dataclasses import dataclass, field
 
 from monty.json import MSONable, jsanitize
@@ -318,8 +317,6 @@ class Job(MSONable):
     ):
         from copy import deepcopy
 
-        from jobflow.utils.find import contains_flow_or_job
-
         function_args = () if function_args is None else function_args
         function_kwargs = {} if function_kwargs is None else function_kwargs
         uuid = suuid() if uuid is None else uuid
@@ -352,16 +349,17 @@ class Job(MSONable):
 
         self.output = OutputReference(self.uuid, output_schema=self.output_schema)
 
-        # check to see if job or flow is included in the job args
-        # this is a possible situation but likely a mistake
-        all_args = tuple(self.function_args) + tuple(self.function_kwargs.values())
-        if contains_flow_or_job(all_args):
-            warnings.warn(
-                f"Job '{self.name}' contains an Flow or Job as an input. "
-                f"Usually inputs should be the output of a Job or an Flow (e.g. "
-                f"job.output). If this message is unexpected then double check the "
-                f"inputs to your Job."
-            )
+        # check to see if job is included in the job args
+        self.function_args = tuple(
+            [
+                arg.output if isinstance(arg, Job) else arg
+                for arg in list(self.function_args)
+            ]
+        )
+        self.function_kwargs = {
+            arg: v.output if isinstance(v, Job) else v
+            for arg, v in self.function_kwargs.items()
+        }
 
     def __repr__(self):
         """Get a string representation of the job."""
@@ -405,6 +403,44 @@ class Job(MSONable):
     def __hash__(self) -> int:
         """Get the hash of the job."""
         return hash(self.uuid)
+
+    def __getitem__(self, key: Any) -> OutputReference:
+        """
+        Get the corresponding `OutputReference` for the `Job`.
+
+        This is for when it is indexed like a dictionary or list.
+
+        Parameters
+        ----------
+        key
+            The index/key.
+
+        Returns
+        -------
+        OutputReference
+            The equivalent of `Job.output[k]`
+        """
+        return self.output[key]
+
+    def __getattr__(self, name: str) -> OutputReference:
+        """
+        Get the corresponding `OutputReference` for the `Job`.
+
+        This is for when it is indexed like a class attribute.
+
+        Parameters
+        ----------
+        name
+            The name of the attribute.
+
+        Returns
+        -------
+        OutputReference
+            The equivalent of `Job.output.name`
+        """
+        if attr := getattr(self.output, name, None):
+            return attr
+        raise AttributeError(f"{type(self).__name__} has no attribute {name!r}")
 
     @property
     def input_references(self) -> tuple[jobflow.OutputReference, ...]:
