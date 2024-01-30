@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import typing
 
 from fireworks import FiretaskBase, Firework, FWAction, Workflow, explicit_serialize
+from fireworks.fw_config import DS_PASSWORD
+from fireworks.utilities.fw_utilities import DataServer
+from maggma.stores.shared_stores import StoreFacade
 
 if typing.TYPE_CHECKING:
     from collections.abc import Sequence
@@ -153,7 +157,16 @@ class JobFiretask(FiretaskBase):
 
         if store is None:
             store = SETTINGS.JOB_STORE
-        store.connect()
+        if "FW_DATASERVER_PORT" in os.environ:
+            ds = DataServer(
+                address=("127.0.0.1", int(os.environ["FW_DATASERVER_PORT"])),
+                authkey=DS_PASSWORD,
+            )
+            ds.connect()
+            multistore = ds.MultiStore()
+            store = StoreFacade(store, multistore)
+        else:
+            store.connect()
 
         # Add the metadata from the fw_spec
         fw_tags = fw_spec.get("tags", None)
